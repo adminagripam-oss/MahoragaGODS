@@ -51,7 +51,7 @@ def kirim_fonnte(file_path, caption):
     """
     print(f"=== Memulai Pengiriman WhatsApp via Fonnte ===")
     wa_token = os.environ.get("WA_TOKEN")
-    target_phone = os.environ.get("TARGET_PHONE", "120363431116867451@g.us")
+    target_phone = os.environ.get("TARGET_PHONE") or "120363431116867451@g.us"
     
     if not wa_token:
         print("Error: Kredensial 'WA_TOKEN' tidak ditemukan di Environment Variables!")
@@ -85,10 +85,16 @@ def kirim_fonnte(file_path, caption):
             print(f"HTTP Status Code : {response.status_code}")
             print(f"HTTP Response Body: {response.text}")
             
-            if response.status_code == 200:
+            try:
+                res_data = response.json()
+            except Exception:
+                res_data = {}
+                
+            if response.status_code == 200 and res_data.get("status") is True:
                 print("Laporan berhasil dikirim ke WhatsApp via Fonnte.")
             else:
-                print(f"Gagal mengirim laporan. Status HTTP: {response.status_code}")
+                print(f"Gagal mengirim laporan! Status HTTP: {response.status_code}, Status Fonnte: {res_data.get('status')}")
+                sys.exit(1)
     except Exception as e:
         print(f"Error terjadi saat menghubungi API Fonnte: {e}")
         sys.exit(1)
