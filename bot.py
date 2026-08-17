@@ -5,6 +5,22 @@ from datetime import datetime, timezone, timedelta
 import requests
 from playwright.sync_api import sync_playwright
 
+# Muat environment variables dari file .env jika ada (sangat berguna untuk VPS)
+if os.path.exists(".env"):
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    parts = line.split("=", 1)
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        val = parts[1].strip().strip("'").strip('"')
+                        if not os.environ.get(key):
+                            os.environ[key] = val
+    except Exception as e:
+        print(f"Warning: Gagal memuat file .env: {e}")
+
 def get_wib_now():
     """
     Mengembalikan datetime saat ini dalam zona waktu Asia/Jakarta (WIB, UTC+7).
