@@ -196,15 +196,18 @@ if __name__ == "__main__":
         date_str = now_wib.strftime("%d/%m/%Y")
         time_str = now_wib.strftime("%H:%M")
         
-        next_wib = now_wib + timedelta(hours=1)
-        next_hour_str = next_wib.strftime("%H:%M")
+        if hour == 18:
+            next_schedule_str = "besok pukul 06:00 WIB"
+        else:
+            next_wib = now_wib + timedelta(hours=1)
+            next_schedule_str = f"pukul {next_wib.strftime('%H:%M')} WIB"
         
         # 1. Screenshot admin-screenshot.html -> kirim
         ambil_screenshot("https://agri-pam.id/admin-screenshot.html", "admin.jpg")
         caption_admin = (
             f"📊 [Grafik Rekap Total Panen per Jam]\n"
             f"📅 Data per: {date_str} - {time_str} WIB\n"
-            f"⏰ Laporan berikutnya dikirim otomatis pukul {next_hour_str} WIB."
+            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
         )
         kirim_fonnte("admin.jpg", caption_admin)
         
@@ -225,7 +228,7 @@ if __name__ == "__main__":
             f"📅 Data per: {date_str} - {time_str} WIB\n\n"
             f"⚠️ Region Belum Isi Laporan Panen per Jam:\n"
             f"{warning_text}\n\n"
-            f"⏰ Laporan berikutnya dikirim otomatis pukul {next_hour_str} WIB."
+            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
         )
         kirim_fonnte("rekap_cro.jpg", caption_cro)
         
