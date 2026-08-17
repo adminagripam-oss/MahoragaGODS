@@ -2,7 +2,8 @@ name: Daily Report
 
 on:
   schedule:
-    - cron: '10 15 * * *' # 15:10 UTC = 22:10 WIB setiap hari
+    - cron: '30 15 * * *' # 22:30 WIB (15:30 UTC)
+    - cron: '30 23 * * *' # 06:30 WIB (23:30 UTC)
   workflow_dispatch: # Pemicu manual dari tab Actions GitHub
 
 jobs:

@@ -1,20 +1,30 @@
 import os
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 import requests
 from playwright.sync_api import sync_playwright
+
+def get_wib_now():
+    """
+    Mengembalikan datetime saat ini dalam zona waktu Asia/Jakarta (WIB, UTC+7).
+    """
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
 
 def ambil_screenshot(url, filename):
     """
     Mengambil screenshot halaman web menggunakan Playwright (Chromium headless)
     dengan viewport 1920x1080, menunggu networkidle (timeout 60s),
     dan memberikan jeda render selama 6 detik.
+    Mendeteksi region yang belum mengisi data/laporan jika relevan.
     """
     print(f"=== Memulai Proses Screenshot ===")
     print(f"URL     : {url}")
     print(f"Output  : {filename}")
     
     start_time = time.time()
+    warnings = []
+    
     try:
         with sync_playwright() as p:
             print("Membuka browser Chromium headless...")
@@ -32,6 +42,70 @@ def ambil_screenshot(url, filename):
             print("Halaman idle. Menunggu 6 detik tambahan untuk render data...")
             time.sleep(6)
             
+            # 1. Deteksi warning untuk rekap-cro-fullscreen.html
+            if "rekap-cro-fullscreen" in url:
+                print("Mendeteksi region yang belum isi laporan per jam...")
+                try:
+                    # Pastikan tabel selesai dimuat
+                    page.wait_for_function(
+                        'document.getElementById("rekapCROBody") && '
+                        'document.getElementById("rekapCROBody").innerText.indexOf("Memuat data...") === -1',
+                        timeout=30000
+                    )
+                    
+                    all_regions = [
+                        "Aceh", "Sumatera Utara 1", "Sumatera Utara 2 Ex Torganda", "Riau 1",
+                        "Riau 2", "Riau 3", "Riau 4", "Bangka Belitung", "Jambi", "Sumatera Barat",
+                        "Sumatera Selatan", "Kalimantan Barat 1A", "Kalimantan Barat 1B", "Kalimantan Barat 2",
+                        "Kalimantan Selatan 1", "Kalimantan Selatan 2", "Kalimantan Timur", "Kalimantan Utara",
+                        "Kalimantan Tengah 1", "Kalimantan Tengah 3", "Kalimantan Tengah 2", "Sulawesi Tenggara",
+                        "Sulawesi Tengah"
+                    ]
+                    cells = page.query_selector_all("#rekapCROBody td")
+                    for cell in cells:
+                        text = cell.inner_text().strip()
+                        if text in all_regions:
+                            class_attr = cell.get_attribute("class") or ""
+                            if "bg-red-500" in class_attr:
+                                warnings.append(text)
+                except Exception as ex:
+                    print(f"Gagal memparse warning rekap CRO: {ex}")
+            
+            # 2. Deteksi warning untuk table-modal-fullscreen.html
+            elif "table-modal-fullscreen" in url:
+                print("Mendeteksi region yang belum mengisi rencana panen...")
+                try:
+                    # Pastikan tabel selesai dimuat
+                    page.wait_for_function(
+                        'document.getElementById("modalTableBody") && '
+                        'document.getElementById("modalTableBody").innerText.indexOf("Memuat data...") === -1',
+                        timeout=30000
+                    )
+                    
+                    rows = page.query_selector_all("#modalTableBody tr")
+                    all_regions = [
+                        "Aceh", "Sumatera Utara 1", "Sumatera Utara 2 Ex Torganda", "Riau 1",
+                        "Riau 2", "Riau 3", "Riau 4", "Bangka Belitung", "Jambi", "Sumatera Barat",
+                        "Sumatera Selatan", "Kalimantan Barat 1A", "Kalimantan Barat 1B", "Kalimantan Barat 2",
+                        "Kalimantan Selatan 1", "Kalimantan Selatan 2", "Kalimantan Utara",
+                        "Kalimantan Timur", "Kalimantan Tengah 1", "Kalimantan Tengah 2",
+                        "Kalimantan Tengah 3", "Sulawesi Tengah", "Sulawesi Tenggara"
+                    ]
+                    for row in rows:
+                        cells = row.query_selector_all("td")
+                        if len(cells) >= 2:
+                            region_cell = cells[1]
+                            style = region_cell.get_attribute("style") or ""
+                            text = region_cell.inner_text().strip()
+                            if "b91c1c" in style or "◯" in text or "\u25CB" in text or "9711" in text:
+                                # Cocokkan dengan region list untuk membersihkan icon status
+                                for r in all_regions:
+                                    if r in text:
+                                        warnings.append(r)
+                                        break
+                except Exception as ex:
+                    print(f"Gagal memparse warning rencana panen: {ex}")
+            
             # Ambil screenshot (format JPEG)
             page.screenshot(path=filename, type="jpeg")
             print(f"Screenshot berhasil disimpan di: {filename}")
@@ -44,6 +118,7 @@ def ambil_screenshot(url, filename):
         
     duration = time.time() - start_time
     print(f"Proses screenshot selesai dalam {duration:.2f} detik.\n")
+    return warnings
 
 def kirim_fonnte(file_path, caption):
     """
@@ -51,7 +126,7 @@ def kirim_fonnte(file_path, caption):
     """
     print(f"=== Memulai Pengiriman WhatsApp via Fonnte ===")
     wa_token = os.environ.get("WA_TOKEN")
-    target_phone = os.environ.get("TARGET_PHONE") or "120363431116867451@g.us"
+    target_phone = os.environ.get("TARGET_PHONE") or "120363410041245092@g.us"
     
     if not wa_token:
         print("Error: Kredensial 'WA_TOKEN' tidak ditemukan di Environment Variables!")
@@ -110,23 +185,83 @@ if __name__ == "__main__":
     
     if mode == "hourly":
         print("Menjalankan tugas: HOURLY REPORT\n")
+        
+        # Pengaman: Jalankan hanya antara jam 06:00 dan 18:00 WIB
+        now_wib = get_wib_now()
+        hour = now_wib.hour
+        if not (6 <= hour <= 18):
+            print(f"Bypass: Hourly report hanya aktif antara 06:00 - 18:00 WIB (Saat ini: {now_wib.strftime('%H:%M')} WIB)")
+            sys.exit(0)
+            
+        date_str = now_wib.strftime("%d/%m/%Y")
+        time_str = now_wib.strftime("%H:%M")
+        
+        next_wib = now_wib + timedelta(hours=1)
+        next_hour_str = next_wib.strftime("%H:%M")
+        
         # 1. Screenshot admin-screenshot.html -> kirim
         ambil_screenshot("https://agri-pam.id/admin-screenshot.html", "admin.jpg")
-        kirim_fonnte("admin.jpg", "📊 *Update Laporan Per Jam (Admin)*")
+        caption_admin = (
+            f"📊 [Grafik Rekap Total Panen per Jam]\n"
+            f"📅 Data per: {date_str} - {time_str} WIB\n"
+            f"⏰ Laporan berikutnya dikirim otomatis pukul {next_hour_str} WIB."
+        )
+        kirim_fonnte("admin.jpg", caption_admin)
         
         # 2. Jeda 3 detik
         print("Menunggu jeda 3 detik...")
         time.sleep(3)
         
-        # 3. Screenshot rekap-cro-fullscreen.html -> kirim
-        ambil_screenshot("https://agri-pam.id/rekap-cro-fullscreen.html", "rekap_cro.jpg")
-        kirim_fonnte("rekap_cro.jpg", "📊 *Update Laporan Per Jam (Rekap CRO)*")
+        # 3. Screenshot rekap-cro-fullscreen.html -> kirim dengan deteksi warning
+        late_regions = ambil_screenshot("https://agri-pam.id/rekap-cro-fullscreen.html", "rekap_cro.jpg")
+        
+        if late_regions:
+            warning_text = "\n".join([f"⚠️ {r}" for r in late_regions])
+        else:
+            warning_text = "⚠️ (Semua region sudah mengisi)"
+            
+        caption_cro = (
+            f"📑 [Tabel Rekap Total Panen per Jam]\n"
+            f"📅 Data per: {date_str} - {time_str} WIB\n\n"
+            f"⚠️ Region Belum Isi Laporan Panen per Jam:\n"
+            f"{warning_text}\n\n"
+            f"⏰ Laporan berikutnya dikirim otomatis pukul {next_hour_str} WIB."
+        )
+        kirim_fonnte("rekap_cro.jpg", caption_cro)
         
     elif mode == "daily_2210":
-        print("Menjalankan tugas: DAILY REPORT 22:10 WIB\n")
-        # 1. Screenshot table-modal-fullscreen.html -> kirim
-        ambil_screenshot("https://agri-pam.id/table-modal-fullscreen.html", "table_modal.jpg")
-        kirim_fonnte("table_modal.jpg", "📌 *Laporan Harian (Table Modal) - 22:10 WIB*")
+        print("Menjalankan tugas: DAILY REPORT\n")
+        
+        now_wib = get_wib_now()
+        date_str = now_wib.strftime("%d/%m/%Y")
+        
+        # Tentukan apakah pengiriman pagi (06:30) atau malam (22:30)
+        hour = now_wib.hour
+        if hour < 12:
+            # Pagi
+            caption_time = "06:30"
+            next_schedule = "pukul 22:30 WIB."
+        else:
+            # Malam
+            caption_time = "22:30"
+            next_schedule = "besok pukul 06:30 WIB."
+            
+        # 1. Screenshot table-modal-fullscreen.html -> kirim dengan deteksi rencana panen yang belum terisi
+        unfilled_plans = ambil_screenshot("https://agri-pam.id/table-modal-fullscreen.html", "table_modal.jpg")
+        
+        if unfilled_plans:
+            warning_text = "\n".join([f"🔴 ◯{r}" for r in unfilled_plans])
+        else:
+            warning_text = "🔴 (Semua region sudah mengisi rencana)"
+            
+        caption_daily = (
+            f"📢 [Tabel Rencana & Estimasi Panen]\n"
+            f"📅 Data per: {date_str} - {caption_time} WIB\n\n"
+            f"🔴 Region Belum Mengisi Rencana Panen:\n"
+            f"{warning_text}\n\n"
+            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule}"
+        )
+        kirim_fonnte("table_modal.jpg", caption_daily)
         
     else:
         print(f"Error: Mode '{mode}' tidak valid.")
