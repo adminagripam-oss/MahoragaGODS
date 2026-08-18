@@ -1,9 +1,8 @@
 name: Daily Report
 
 on:
-  schedule:
-    - cron: '30 15 * * *' # 22:30 WIB (15:30 UTC)
-    - cron: '30 23 * * *' # 06:30 WIB (23:30 UTC)
+  repository_dispatch:
+    types: [daily_report_trigger]
   workflow_dispatch: # Pemicu manual dari tab Actions GitHub
 
 jobs:

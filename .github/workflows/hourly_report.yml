@@ -1,9 +1,8 @@
 name: Hourly Report
 
 on:
-  schedule:
-    - cron: '0 23 * * *'       # 06:00 WIB (23:00 UTC hari sebelumnya)
-    - cron: '0 0-11 * * *'     # 07:00 - 18:00 WIB (00:00 - 11:00 UTC)
+  repository_dispatch:
+    types: [hourly_report_trigger]
   workflow_dispatch: # Pemicu manual dari tab Actions GitHub
 
 jobs:
