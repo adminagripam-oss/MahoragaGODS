@@ -316,16 +316,16 @@ if __name__ == "__main__":
         now_wib = get_wib_now()
         date_str = now_wib.strftime("%d/%m/%Y")
         
-        # Tentukan apakah pengiriman pagi (06:30) atau malam (22:30)
-        hour = now_wib.hour
-        if hour < 12:
-            # Pagi
-            caption_time = "06:30"
-            next_schedule = "pukul 22:30 WIB."
+        # Tentukan apakah pengiriman jam 21:00, 22:00, atau 23:00 WIB
+        current_time_val = now_wib.hour * 100 + now_wib.minute
+        caption_time = now_wib.strftime("%H:%M")
+        
+        if current_time_val <= 2130:
+            next_schedule = "pukul 22:00 WIB."
+        elif current_time_val <= 2230:
+            next_schedule = "pukul 23:00 WIB."
         else:
-            # Malam
-            caption_time = "22:30"
-            next_schedule = "besok pukul 06:30 WIB."
+            next_schedule = "besok pukul 21:00 WIB."
             
         # 1. Screenshot table-modal-fullscreen.html -> kirim dengan deteksi rencana panen yang belum terisi
         unfilled_plans = ambil_screenshot("https://agri-pam.id/table-modal-fullscreen.html", "table_modal.jpg")
