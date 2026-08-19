@@ -239,21 +239,26 @@ if __name__ == "__main__":
     if mode == "hourly":
         print("Menjalankan tugas: HOURLY REPORT\n")
         
-        # Pengaman: Jalankan hanya antara jam 06:00 dan 18:00 WIB
+        # Pengaman: Jalankan hanya antara jam 06:00 dan 23:00 WIB
         now_wib = get_wib_now()
-        hour = now_wib.hour
-        if not (6 <= hour <= 18):
-            print(f"Bypass: Hourly report hanya aktif antara 06:00 - 18:00 WIB (Saat ini: {now_wib.strftime('%H:%M')} WIB)")
+        current_time_val = now_wib.hour * 100 + now_wib.minute
+        if not (600 <= current_time_val <= 2300):
+            print(f"Bypass: Hourly report hanya aktif antara 06:00 - 23:00 WIB (Saat ini: {now_wib.strftime('%H:%M')} WIB)")
             sys.exit(0)
             
         date_str = now_wib.strftime("%d/%m/%Y")
         time_str = now_wib.strftime("%H:%M")
         
-        if hour == 18:
+        # Tentukan jadwal berikutnya
+        if current_time_val >= 2300:
             next_schedule_str = "besok pukul 06:00 WIB"
         else:
             next_wib = now_wib + timedelta(hours=1)
-            next_schedule_str = f"pukul {next_wib.strftime('%H:%M')} WIB"
+            next_time_val = next_wib.hour * 100 + next_wib.minute
+            if next_time_val > 2300:
+                next_schedule_str = "besok pukul 06:00 WIB"
+            else:
+                next_schedule_str = f"pukul {next_wib.strftime('%H:%M')} WIB"
         
         # 1. Screenshot admin-screenshot.html -> kirim
         ambil_screenshot("https://agri-pam.id/admin-screenshot.html", "admin.jpg")
