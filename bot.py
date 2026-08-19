@@ -123,6 +123,41 @@ def ambil_screenshot(url, filename):
                 except Exception as ex:
                     print(f"Gagal memparse warning rencana panen: {ex}")
             
+            # 3. Deteksi warning untuk rekap_tk_panen.html
+            elif "rekap_tk_panen" in url:
+                print("Mendeteksi region yang belum mengisi ketersediaan TK Panen...")
+                try:
+                    # Pastikan tabel selesai dimuat
+                    page.wait_for_selector("#monitoring-tk-table tbody tr", timeout=30000)
+                    
+                    rows = page.query_selector_all("#monitoring-tk-table tbody tr")
+                    all_regions = [
+                        "Aceh", "Sumut 1", "Sumut 2", "Riau 1",
+                        "Riau 2", "Riau 3", "Riau 4", "Babel", "Jambi", "Sumbar",
+                        "Sumsel", "Kalbar 1", "Kalbar 2", "Kalsel 1", "Kalsel 2",
+                        "Kaltara", "Kaltim", "Kalteng 1", "Kalteng 2", "Kalteng 3",
+                        "Sulteng", "Sultra",
+                        # Fallbacks in case names are different
+                        "Sumatera Utara 1", "Sumatera Utara 2 Ex Torganda", "Sumut 2 Ex Torganda",
+                        "Bangka Belitung", "Sumatera Barat", "Sumatera Selatan",
+                        "Kalimantan Barat 1A", "Kalimantan Barat 1B", "Kalimantan Barat 2",
+                        "Kalimantan Selatan 1", "Kalimantan Selatan 2", "Kalimantan Utara",
+                        "Kalimantan Timur", "Kalimantan Tengah 1", "Kalimantan Tengah 2",
+                        "Kalimantan Tengah 3", "Sulawesi Tengah", "Sulawesi Tenggara"
+                    ]
+                    for row in rows:
+                        class_attr = row.get_attribute("class") or ""
+                        if "bg-red-50" in class_attr:
+                            cells = row.query_selector_all("td")
+                            for cell in cells:
+                                text = cell.inner_text().strip()
+                                for r in all_regions:
+                                    if r.lower() == text.lower() or text.lower() == r.lower():
+                                        warnings.append(r)
+                                        break
+                except Exception as ex:
+                    print(f"Gagal memparse warning ketersediaan TK panen: {ex}")
+            
             # Ambil screenshot (format JPEG)
             page.screenshot(path=filename, type="jpeg")
             print(f"Screenshot berhasil disimpan di: {filename}")
@@ -137,13 +172,14 @@ def ambil_screenshot(url, filename):
     print(f"Proses screenshot selesai dalam {duration:.2f} detik.\n")
     return warnings
 
-def kirim_fonnte(file_path, caption):
+def kirim_fonnte(file_path, caption, target_phone=None):
     """
     Mengirim file screenshot lokal ke WhatsApp via REST API Fonnte.
     """
     print(f"=== Memulai Pengiriman WhatsApp via Fonnte ===")
     wa_token = os.environ.get("WA_TOKEN")
-    target_phone = os.environ.get("TARGET_PHONE") or "120363410041245092@g.us"
+    if not target_phone:
+        target_phone = os.environ.get("TARGET_PHONE") or "120363410041245092@g.us"
     
     if not wa_token:
         print("Error: Kredensial 'WA_TOKEN' tidak ditemukan di Environment Variables!")
@@ -248,6 +284,26 @@ if __name__ == "__main__":
             f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
         )
         kirim_fonnte("rekap_cro.jpg", caption_cro)
+        
+        # 4. Jeda 3 detik
+        print("Menunggu jeda 3 detik...")
+        time.sleep(3)
+        
+        # 5. Screenshot rekap_tk_panen.html -> kirim ke grup khusus dengan deteksi warning
+        target_grup_tk = os.environ.get("TARGET_PHONE_TK") or "120363425038459858@g.us"
+        late_regions_tk = ambil_screenshot("https://agri-pam.id/rekap_tk_panen.html", "rekap_tk_panen.jpg")
+        
+        if late_regions_tk:
+            warning_text_tk = "\n".join([f"🔴 {r}" for r in late_regions_tk])
+        else:
+            warning_text_tk = "🔴 (Semua region sudah mengisi)"
+            
+        caption_tk = (
+            f"📢 Update Regional Yang belum mengisi Ketersediaan TK Panen\n\n"
+            f"{warning_text_tk}\n\n"
+            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
+        )
+        kirim_fonnte("rekap_tk_panen.jpg", caption_tk, target_phone=target_grup_tk)
         
     elif mode == "daily_2210":
         print("Menjalankan tugas: DAILY REPORT\n")
