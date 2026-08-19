@@ -75,6 +75,8 @@ Proyek ini dilengkapi dengan 2 workflow otomatis:
      1. Screenshot `https://agri-pam.id/admin-screenshot.html` (dikirim dengan caption: *Update Laporan Per Jam (Admin)*).
      2. Jeda 3 detik.
      3. Screenshot `https://agri-pam.id/rekap-cro-fullscreen.html` (dikirim dengan caption: *Update Laporan Per Jam (Rekap CRO)*).
+     4. Jeda 3 detik.
+     5. Screenshot `https://agri-pam.id/rekap_tk_panen.html` (dikirim ke grup khusus `120363425038459858@g.us` dengan caption: *Update Regional Yang belum mengisi Ketersediaan TK Panen*).
 
 2. **Daily Report** (`.github/workflows/daily_report.yml`)
    - **Jadwal (Cron)**: Setiap hari pukul 22:10 WIB / 15:10 UTC (`10 15 * * *`).
