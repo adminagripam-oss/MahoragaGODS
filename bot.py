@@ -290,25 +290,25 @@ if __name__ == "__main__":
         )
         kirim_fonnte("rekap_cro.jpg", caption_cro)
         
-        # 4. Jeda 3 detik
-        print("Menunggu jeda 3 detik...")
-        time.sleep(3)
+        # 4. Jeda 3 detik (Dinonaktifkan karena langkah 5 dinonaktifkan)
+        # print("Menunggu jeda 3 detik...")
+        # time.sleep(3)
         
-        # 5. Screenshot rekap_tk_panen.html -> kirim ke grup khusus dengan deteksi warning
-        target_grup_tk = os.environ.get("TARGET_PHONE_TK") or "120363425038459858@g.us"
-        late_regions_tk = ambil_screenshot("https://agri-pam.id/rekap_tk_panen.html", "rekap_tk_panen.jpg")
-        
-        if late_regions_tk:
-            warning_text_tk = "\n".join([f"🔴 {r}" for r in late_regions_tk])
-        else:
-            warning_text_tk = "🔴 (Semua region sudah mengisi)"
-            
-        caption_tk = (
-            f"📢 Update Regional Yang belum mengisi Ketersediaan TK Panen\n\n"
-            f"{warning_text_tk}\n\n"
-            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
-        )
-        kirim_fonnte("rekap_tk_panen.jpg", caption_tk, target_phone=target_grup_tk)
+        # 5. Screenshot rekap_tk_panen.html -> kirim ke grup khusus dengan deteksi warning (Dinonaktifkan sesuai permintaan)
+        # target_grup_tk = os.environ.get("TARGET_PHONE_TK") or "120363425038459858@g.us"
+        # late_regions_tk = ambil_screenshot("https://agri-pam.id/rekap_tk_panen.html", "rekap_tk_panen.jpg")
+        # 
+        # if late_regions_tk:
+        #     warning_text_tk = "\n".join([f"🔴 {r}" for r in late_regions_tk])
+        # else:
+        #     warning_text_tk = "🔴 (Semua region sudah mengisi)"
+        #     
+        # caption_tk = (
+        #     f"📢 Update Regional Yang belum mengisi Ketersediaan TK Panen\n\n"
+        #     f"{warning_text_tk}\n\n"
+        #     f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
+        # )
+        # kirim_fonnte("rekap_tk_panen.jpg", caption_tk, target_phone=target_grup_tk)
         
     elif mode == "daily_2210":
         print("Menjalankan tugas: DAILY REPORT\n")
