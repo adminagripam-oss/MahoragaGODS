@@ -52,8 +52,8 @@ def ambil_screenshot(url, filename):
             page = browser.new_page(viewport={"width": 1920, "height": 1080})
             
             # Navigasi ke URL dengan timeout 60 detik (60000 ms) dan tunggu networkidle
-            print("Membuka URL dan menunggu networkidle (maksimal 60 detik)...")
-            page.goto(url, wait_until="networkidle", timeout=60000)
+            print("Membuka URL dan menunggu load (maksimal 60 detik)...")
+            page.goto(url, wait_until="load", timeout=60000)
             
             # Jeda tambahan 6 detik untuk render grafik/tabel
             print("Halaman idle. Menunggu 6 detik tambahan untuk render data...")
