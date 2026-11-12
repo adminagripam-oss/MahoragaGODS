@@ -34,6 +34,6 @@ jobs:
           TARGET_PHONE: ${{ secrets.TARGET_PHONE }}
           AGRIPAM_BASE_URL: ${{ vars.AGRIPAM_BASE_URL }}
           PUBLIC_READ_TOKEN: ${{ secrets.PUBLIC_READ_TOKEN }}
-          GRAFIK_URL: ${{ vars.GRAFIK_URL }}
+          RENCANA_ESTIMASI_URL: ${{ vars.RENCANA_ESTIMASI_URL }}
         run: |
           python bot.py daily_2210
