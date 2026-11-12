@@ -32,8 +32,13 @@ jobs:
         env:
           WA_TOKEN: ${{ secrets.WA_TOKEN }}
           TARGET_PHONE: ${{ secrets.TARGET_PHONE }}
+          TARGET_PHONE_TK: ${{ secrets.TARGET_PHONE_TK }}
           AGRIPAM_BASE_URL: ${{ vars.AGRIPAM_BASE_URL }}
           PUBLIC_READ_TOKEN: ${{ secrets.PUBLIC_READ_TOKEN }}
           GRAFIK_URL: ${{ vars.GRAFIK_URL }}
+          REKAP_CRO_URL: ${{ vars.REKAP_CRO_URL }}
+          REKAP_TK_PANEN_URL: ${{ vars.REKAP_TK_PANEN_URL }}
+          ENABLE_TK_PANEN: ${{ vars.ENABLE_TK_PANEN }}
+          TK_PANEN_BELUM_LAPOR_JENIS: ${{ vars.TK_PANEN_BELUM_LAPOR_JENIS }}
         run: |
           python bot.py hourly
