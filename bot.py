@@ -30,8 +30,9 @@ if os.path.exists(".env"):
 # ==============================================================================
 BASE_URL = (os.environ.get("AGRIPAM_BASE_URL") or "").strip().rstrip("/") or "https://agri-pam.id"
 
-# Token baca halaman publik v2 (PUBLIC_READ_TOKEN milik API). Tanpa token,
-# halaman publik tidak memuat data dan endpoint belum-lapor menjawab 401.
+# Token baca opsional untuk API privat `/api/v1/publik/belum-lapor`.
+# Halaman `/publik/*` di agri-pam.id dapat diakses publik tanpa token; bila token
+# kosong, daftar region belum lapor diekstrak langsung dari DOM halaman.
 READ_TOKEN = (os.environ.get("PUBLIC_READ_TOKEN") or "").strip()
 
 
@@ -71,17 +72,17 @@ RENCANA_ESTIMASI_URL = siapkan_url_halaman("RENCANA_ESTIMASI_URL", "rencana-esti
 REKAP_TK_PANEN_URL = siapkan_url_halaman("REKAP_TK_PANEN_URL", "rekap-tk-panen")
 
 
-def pastikan_read_token():
-    """Hentikan eksekusi lebih awal jika PUBLIC_READ_TOKEN belum diisi."""
-    if not READ_TOKEN:
-        print("Error: 'PUBLIC_READ_TOKEN' tidak ditemukan di Environment Variables!")
-        sys.exit(1)
-
-
-def ambil_screenshot(url, filename, wait_selector="table tbody tr", require_selector=True):
+def ambil_screenshot(
+    url,
+    filename,
+    wait_selector="table tbody tr",
+    require_selector=True,
+    extract_selector=None,
+):
     """
     Mengambil screenshot halaman web menggunakan Playwright (Chromium headless)
     dengan viewport 1920x1080, menunggu elemen data muncul, lalu memberi jeda render.
+    Jika `extract_selector` diberikan, mengekstrak daftar teks region unik dari DOM.
     """
     print("=== Memulai Proses Screenshot ===")
     # Token tidak ikut dicetak ke log.
@@ -89,6 +90,7 @@ def ambil_screenshot(url, filename, wait_selector="table tbody tr", require_sele
     print(f"Output  : {filename}")
 
     start_time = time.time()
+    extracted = []
 
     try:
         with sync_playwright() as p:
@@ -117,6 +119,18 @@ def ambil_screenshot(url, filename, wait_selector="table tbody tr", require_sele
                 print("Menunggu 6 detik tambahan untuk render data...")
                 time.sleep(6)
 
+                if extract_selector:
+                    try:
+                        raw_texts = page.locator(extract_selector).all_inner_texts()
+                        cleaned_items = []
+                        for txt in raw_texts:
+                            cleaned = txt.strip().lstrip("◯✓").strip()
+                            if cleaned:
+                                cleaned_items.append(cleaned)
+                        extracted = list(dict.fromkeys(cleaned_items))
+                    except Exception as extract_err:
+                        print(f"Info: Gagal membaca daftar region dari DOM ({extract_err}); lanjut dengan fallback.")
+
                 page.screenshot(path=filename, type="jpeg")
                 print(f"Screenshot berhasil disimpan di: {filename}")
             finally:
@@ -131,47 +145,52 @@ def ambil_screenshot(url, filename, wait_selector="table tbody tr", require_sele
 
     duration = time.time() - start_time
     print(f"Proses screenshot selesai dalam {duration:.2f} detik.\n")
+    return extracted
 
 
-def ambil_belum_lapor(jenis, tanggal=None):
+def ambil_belum_lapor(jenis, tanggal=None, fallback_regions=None):
     """
-    Mengambil daftar region yang belum melapor dari API v2.
-
-    Daftar ini dulu disusun dengan membaca DOM halaman lama (class bg-red-500 dan
-    sejenisnya) dan setiap galat parsing ditelan. Cara itu gagal diam-diam begitu
-    tampilan berubah: daftarnya menjadi kosong dan caption menyatakan semua region
-    sudah mengisi. Sekarang datanya dari API, dan kegagalan menghentikan proses.
+    Mengambil daftar region yang belum melapor dari API v2 bila PUBLIC_READ_TOKEN tersedia,
+    dan otomatis fallback ke hasil ekstraksi DOM (`fallback_regions`) bila token kosong
+    atau endpoint API privat menolak/gagal.
     """
     print(f"=== Mengambil daftar region belum lapor ({jenis}) ===")
-    pastikan_read_token()
+    if not READ_TOKEN:
+        regions = list(fallback_regions or [])
+        print("Info: 'PUBLIC_READ_TOKEN' tidak diisi; menggunakan hasil ekstraksi DOM halaman publik.")
+        print(f"Belum lapor (DOM): {len(regions)} region\n")
+        return regions
 
     url = f"{BASE_URL}/api/v1/publik/belum-lapor"
     params = {"jenis": jenis}
     if tanggal:
         params["tanggal"] = tanggal
 
+    def _fallback_atau_henti(pesan_error):
+        if fallback_regions is not None:
+            print(f"Info: {pesan_error} — menggunakan hasil ekstraksi DOM ({len(fallback_regions)} region).\n")
+            return list(fallback_regions)
+        print(pesan_error)
+        sys.exit(1)
+
     try:
         response = requests.get(
             url, params=params, headers={"X-Read-Token": READ_TOKEN}, timeout=30
         )
     except Exception as e:
-        print(f"Error saat menghubungi API belum-lapor: {e}")
-        sys.exit(1)
+        return _fallback_atau_henti(f"Error saat menghubungi API belum-lapor: {e}")
 
     if response.status_code != 200:
-        print(f"Gagal membaca daftar belum lapor. HTTP {response.status_code}: {response.text}")
-        sys.exit(1)
+        return _fallback_atau_henti(f"Gagal membaca daftar belum lapor. HTTP {response.status_code}: {response.text}")
 
     try:
         data = response.json()
     except Exception:
-        print(f"Jawaban API bukan JSON: {response.text}")
-        sys.exit(1)
+        return _fallback_atau_henti(f"Jawaban API bukan JSON: {response.text}")
 
     regions = data.get("regions")
     if not isinstance(regions, list):
-        print(f"Jawaban API tidak sesuai dugaan: {response.text}")
-        sys.exit(1)
+        return _fallback_atau_henti(f"Jawaban API tidak sesuai dugaan: {response.text}")
 
     print(f"Slot diperiksa : {data.get('jam')}")
     print(f"Belum lapor    : {len(regions)} dari {data.get('total')} region\n")
@@ -249,22 +268,22 @@ def hitung_jadwal_hourly_berikutnya(now_wib):
 
 def jalankan_tk_panen(now_wib, next_schedule_str):
     """Mengambil screenshot Rekap TK Panen (/publik/rekap-tk-panen) dan mengirim ke grup TK."""
-    pastikan_read_token()
     date_str = now_wib.strftime("%d/%m/%Y")
     time_str = now_wib.strftime("%H:%M")
     target_grup_tk = (os.environ.get("TARGET_PHONE_TK") or "").strip() or "120363425038459858@g.us"
     tk_jenis = (os.environ.get("TK_PANEN_BELUM_LAPOR_JENIS") or "").strip()
 
+    ambil_screenshot(REKAP_TK_PANEN_URL, "rekap_tk_panen.jpg")
+
     warning_section = ""
     if tk_jenis:
-        late_regions_tk = ambil_belum_lapor(tk_jenis)
+        late_regions_tk = ambil_belum_lapor(tk_jenis, fallback_regions=[])
         if late_regions_tk:
             warning_text_tk = "\n".join([f"🔴 {r}" for r in late_regions_tk])
         else:
             warning_text_tk = "🔴 (Semua region sudah mengisi)"
         warning_section = f"\n{warning_text_tk}\n"
 
-    ambil_screenshot(REKAP_TK_PANEN_URL, "rekap_tk_panen.jpg")
     if warning_section:
         caption_tk = (
             f"📢 Update Regional Yang belum mengisi Ketersediaan TK Panen\n"
@@ -299,8 +318,6 @@ if __name__ == "__main__":
             print(f"Bypass: Hourly report hanya aktif antara 06:00 - 23:00 WIB (Saat ini: {now_wib.strftime('%H:%M')} WIB)")
             sys.exit(0)
 
-        pastikan_read_token()
-
         date_str = now_wib.strftime("%d/%m/%Y")
         time_str = now_wib.strftime("%H:%M")
         next_schedule_str = hitung_jadwal_hourly_berikutnya(now_wib)
@@ -325,9 +342,13 @@ if __name__ == "__main__":
         else:
             print("Lewati grafik rekap: GRAFIK_URL dinonaktifkan.\n")
 
-        # 2. Tabel rekap per jam (/publik/rekap-cro), dengan daftar region belum lapor dari API
-        late_regions = ambil_belum_lapor("realisasi")
-        ambil_screenshot(REKAP_CRO_URL, "rekap_cro.jpg")
+        # 2. Tabel rekap per jam (/publik/rekap-cro), dengan daftar region belum lapor dari API/DOM
+        dom_late_regions = ambil_screenshot(
+            REKAP_CRO_URL,
+            "rekap_cro.jpg",
+            extract_selector="table tbody td.bg-destructive",
+        )
+        late_regions = ambil_belum_lapor("realisasi", fallback_regions=dom_late_regions)
 
         if late_regions:
             warning_text = "\n".join([f"⚠️ {r}" for r in late_regions])
@@ -352,8 +373,6 @@ if __name__ == "__main__":
     elif mode == "daily_2210":
         print("Menjalankan tugas: DAILY REPORT\n")
 
-        pastikan_read_token()
-
         now_wib = get_wib_now()
         date_str = now_wib.strftime("%d/%m/%Y")
 
@@ -368,9 +387,13 @@ if __name__ == "__main__":
         else:
             next_schedule = "besok pukul 21:00 WIB."
 
-        # Tabel rencana & estimasi (/publik/rencana-estimasi), dengan daftar region belum mengisi dari API
-        unfilled_plans = ambil_belum_lapor("estimasi")
-        ambil_screenshot(RENCANA_ESTIMASI_URL, "table_modal.jpg")
+        # Tabel rencana & estimasi (/publik/rencana-estimasi), dengan daftar region belum mengisi dari API/DOM
+        dom_unfilled_plans = ambil_screenshot(
+            RENCANA_ESTIMASI_URL,
+            "table_modal.jpg",
+            extract_selector="table tbody td.text-destructive",
+        )
+        unfilled_plans = ambil_belum_lapor("estimasi", fallback_regions=dom_unfilled_plans)
 
         if unfilled_plans:
             warning_text = "\n".join([f"🔴 ◯{r}" for r in unfilled_plans])
