@@ -346,7 +346,7 @@ if __name__ == "__main__":
         dom_late_regions = ambil_screenshot(
             REKAP_CRO_URL,
             "rekap_cro.jpg",
-            extract_selector="table tbody td.bg-destructive",
+            extract_selector="[data-belum-lapor]",
         )
         late_regions = ambil_belum_lapor("realisasi", fallback_regions=dom_late_regions)
 
@@ -391,7 +391,7 @@ if __name__ == "__main__":
         dom_unfilled_plans = ambil_screenshot(
             RENCANA_ESTIMASI_URL,
             "table_modal.jpg",
-            extract_selector="table tbody td.text-destructive",
+            extract_selector="[data-belum-isi]",
         )
         unfilled_plans = ambil_belum_lapor("estimasi", fallback_regions=dom_unfilled_plans)
 
