@@ -81,6 +81,17 @@ Untuk menjalankan script secara lokal, ikuti langkah-langkah berikut:
      python bot.py tk_panen
      ```
 
+6. **Mencoba tanpa mengirim ke grup**. Dua variabel khusus pengujian, keduanya mati bila tidak diisi:
+   - `DRY_RUN=1` mencetak target, berkas, dan caption utuh ke layar lalu berhenti sebelum memanggil Fonnte. Tidak perlu `WA_TOKEN`.
+   - `BOT_NOW=2026-11-24T19:30` memalsukan jam (dianggap WIB), supaya ketiga cabang caption rekap-cro bisa dilihat tanpa menunggu jamnya.
+
+   ```bash
+   DRY_RUN=1 BOT_NOW=2026-11-24T11:05 AGRIPAM_BASE_URL=http://localhost:5173 python bot.py hourly
+   DRY_RUN=1 BOT_NOW=2026-11-24T22:05 AGRIPAM_BASE_URL=http://localhost:5173 python bot.py daily_2210
+   ```
+
+   Untuk mencoba pengiriman sungguhan, arahkan `TARGET_PHONE` ke nomor WhatsApp penguji, bukan ke id grup.
+
 ---
 
 ## ⏳ Jadwal Otomatis (GitHub Actions Workflows)
@@ -88,17 +99,19 @@ Untuk menjalankan script secara lokal, ikuti langkah-langkah berikut:
 Proyek ini dilengkapi dengan 2 workflow otomatis:
 
 1. **Hourly Report** (`.github/workflows/hourly_report.yml`)
-   - **Jadwal (`repository_dispatch` / manual `workflow_dispatch`)**:
+   - **Jadwal (`repository_dispatch` / manual `workflow_dispatch`)**: tiap jam, 06.00 sampai 23.00 WIB. Di luar rentang itu `bot.py hourly` keluar diam-diam dengan kode 0.
    - **Tugas**:
      1. Screenshot `https://agri-pam.id/publik/grafik-jam` (Grafik Rekap Total Panen per Jam; dapat dilewati jika `GRAFIK_URL=off`).
      2. Jeda 3 detik.
      3. Ambil daftar region belum lapor (`realisasi`) dari `/api/v1/publik/belum-lapor` & screenshot `https://agri-pam.id/publik/rekap-cro` (Tabel Rekap Total Panen per Jam).
      4. *(Opsional)* Screenshot `https://agri-pam.id/publik/rekap-tk-panen` ke grup khusus jika `ENABLE_TK_PANEN=true` (nonaktif by default; dapat juga dijalankan manual via `python bot.py tk_panen`).
+   - **Slot jam dalam caption**: caption menyebut slot yang sedang dipantau, diambil dari `jam` pada jawaban API. Slot jatuh tempo satu jam ke belakang, jadi pukul 11.xx memeriksa slot 10.00 dan 18.xx memeriksa 17.30. Di luar 07.00 sampai 18.00 WIB belum ada slot yang jatuh tempo, dan caption menulis "Belum ada jam laporan yang jatuh tempo." alih-alih mengaku semua regional sudah mengisi.
 
 2. **Daily Report** (`.github/workflows/daily_report.yml`)
-   - **Jadwal (`repository_dispatch` / manual `workflow_dispatch`)**:
+   - **Jadwal (`repository_dispatch` / manual `workflow_dispatch`)**: pukul 21.00, 22.00, dan 23.00 WIB.
    - **Tugas**:
      1. Ambil daftar region belum mengisi rencana (`estimasi`) dari `/api/v1/publik/belum-lapor` & screenshot `https://agri-pam.id/publik/rencana-estimasi` (Tabel Rencana & Estimasi Panen).
+   - **Melaporkan H+1**: laporan malam ini mengingatkan regional mengisi rencana panen **hari berikutnya**, jadi screenshot dan daftar "belum mengisi" memakai tanggal besok (`?tanggal=`). Karena itu `RENCANA_ESTIMASI_URL` tidak boleh memuat `tanggal=`; bila dipatok di sana, nilai itulah yang dipakai dan bot hanya mencatatnya di log.
 
 ---
 

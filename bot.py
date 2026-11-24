@@ -36,11 +36,77 @@ BASE_URL = (os.environ.get("AGRIPAM_BASE_URL") or "").strip().rstrip("/") or "ht
 READ_TOKEN = (os.environ.get("PUBLIC_READ_TOKEN") or "").strip()
 
 
+WIB = timezone(timedelta(hours=7))
+
+# Ditulis tetap di sini, bukan lewat `locale`: runner GitHub tidak menjamin locale Indonesia ada.
+HARI_INDO = ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")
+BULAN_INDO = (
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+)
+
+# 12 slot laporan per jam (BR-07), sama persis dengan JAM_SLOTS di packages/shared.
+JAM_SLOTS = (
+    "06.00", "07.00", "08.00", "09.00", "10.00", "11.00",
+    "12.00", "13.00", "14.00", "15.00", "16.00", "17.30",
+)
+
+
 def get_wib_now():
     """
     Mengembalikan datetime saat ini dalam zona waktu Asia/Jakarta (WIB, UTC+7).
+    BOT_NOW ("2026-11-24T19:30", dianggap WIB) memalsukan jamnya untuk menguji caption.
     """
-    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
+    palsu = (os.environ.get("BOT_NOW") or "").strip()
+    if palsu:
+        return datetime.fromisoformat(palsu).replace(tzinfo=WIB)
+    return datetime.now(timezone.utc).astimezone(WIB)
+
+
+def tanggal_iso(dt):
+    """YYYY-MM-DD, bentuk yang diminta halaman publik dan API."""
+    return dt.strftime("%Y-%m-%d")
+
+
+def tanggal_besok(now_wib):
+    """Hari berikutnya dalam WIB. Rencana panen diisi malam sebelumnya (BR-17)."""
+    return now_wib + timedelta(days=1)
+
+
+def format_tanggal_indo(dt):
+    """Contoh: "Senin, 24 November 2026"."""
+    return f"{HARI_INDO[dt.weekday()]}, {dt.day} {BULAN_INDO[dt.month - 1]} {dt.year}"
+
+
+def format_waktu_indo(dt):
+    """Contoh: "Senin, 24 November 2026 pukul 11.05 WIB"."""
+    return f"{format_tanggal_indo(dt)} pukul {dt.strftime('%H.%M')} WIB"
+
+
+def slot_jatuh_tempo(now_wib):
+    """
+    Slot jam yang seharusnya sudah dilaporkan sekarang: satu jam ke belakang, jadi pukul
+    11.xx memeriksa slot 10.00 dan 18.xx memeriksa 17.30. Di luar 07.00-18.00 WIB belum ada
+    yang jatuh tempo. Cermin dari slotDue() di packages/shared/src/publik.ts.
+    """
+    jam = now_wib.hour
+    if 7 <= jam <= 18:
+        return JAM_SLOTS[jam - 7]
+    return None
+
+
+def dengan_tanggal(url, tanggal):
+    """
+    Menempelkan ?tanggal= pada URL halaman, menghormati query string yang sudah ada
+    (siapkan_url_halaman bisa sudah menaruh ?token= di sana). Tanggal yang sudah dipatok di
+    URL dibiarkan: itu pilihan sadar pemilik lewat repository variable, dan menimpanya
+    diam-diam lebih berbahaya daripada mencatatnya di log.
+    """
+    if "tanggal=" in url:
+        print("Info: URL halaman sudah memuat tanggal; nilai itu dipakai apa adanya.")
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}tanggal={tanggal}"
 
 
 def halaman_publik(path):
@@ -148,18 +214,28 @@ def ambil_screenshot(
     return extracted
 
 
-def ambil_belum_lapor(jenis, tanggal=None, fallback_regions=None):
+def ambil_belum_lapor(
+    jenis, tanggal=None, fallback_regions=None, jam_fallback=None, dom_tersedia=True
+):
     """
     Mengambil daftar region yang belum melapor dari API v2 bila PUBLIC_READ_TOKEN tersedia,
     dan otomatis fallback ke hasil ekstraksi DOM (`fallback_regions`) bila token kosong
     atau endpoint API privat menolak/gagal.
+
+    Mengembalikan {"jam": slot | None, "regions": [...], "terbaca": bool}. `terbaca` False
+    berarti daftarnya gagal dibaca, bukan bahwa semua sudah mengisi; caption harus
+    membedakan keduanya. `jam_fallback` dipakai saat jawaban API tidak ada, dan
+    `dom_tersedia` False untuk pemanggil yang tidak mengais DOM sama sekali (Rekap TK Panen),
+    sehingga daftar kosongnya tidak disalahartikan sebagai "semua sudah mengisi".
     """
     print(f"=== Mengambil daftar region belum lapor ({jenis}) ===")
+    if tanggal:
+        print(f"Tanggal        : {tanggal}")
     if not READ_TOKEN:
         regions = list(fallback_regions or [])
         print("Info: 'PUBLIC_READ_TOKEN' tidak diisi; menggunakan hasil ekstraksi DOM halaman publik.")
         print(f"Belum lapor (DOM): {len(regions)} region\n")
-        return regions
+        return {"jam": jam_fallback, "regions": regions, "terbaca": dom_tersedia}
 
     url = f"{BASE_URL}/api/v1/publik/belum-lapor"
     params = {"jenis": jenis}
@@ -168,8 +244,8 @@ def ambil_belum_lapor(jenis, tanggal=None, fallback_regions=None):
 
     def _fallback_atau_henti(pesan_error):
         if fallback_regions is not None:
-            print(f"Info: {pesan_error} — menggunakan hasil ekstraksi DOM ({len(fallback_regions)} region).\n")
-            return list(fallback_regions)
+            print(f"Info: {pesan_error}. Memakai hasil ekstraksi DOM ({len(fallback_regions)} region).\n")
+            return {"jam": jam_fallback, "regions": list(fallback_regions), "terbaca": dom_tersedia}
         print(pesan_error)
         sys.exit(1)
 
@@ -192,9 +268,14 @@ def ambil_belum_lapor(jenis, tanggal=None, fallback_regions=None):
     if not isinstance(regions, list):
         return _fallback_atau_henti(f"Jawaban API tidak sesuai dugaan: {response.text}")
 
-    print(f"Slot diperiksa : {data.get('jam')}")
+    jam = data.get("jam")
+    if jenis == "realisasi" and jam_fallback is not None and jam != jam_fallback:
+        # Server menurunkan `jam` dari jam yang sama dengan yang dipakainya menyaring data,
+        # jadi menamai daftar ini dengan slot hitungan lokal akan salah saat menit berganti.
+        print(f"Info: slot dari API ({jam}) berbeda dari hitungan lokal ({jam_fallback}); caption memakai nilai API.")
+    print(f"Slot diperiksa : {jam}")
     print(f"Belum lapor    : {len(regions)} dari {data.get('total')} region\n")
-    return regions
+    return {"jam": jam, "regions": regions, "terbaca": True}
 
 
 def kirim_fonnte(file_path, caption, target_phone=None):
@@ -205,6 +286,17 @@ def kirim_fonnte(file_path, caption, target_phone=None):
     wa_token = (os.environ.get("WA_TOKEN") or "").strip()
     if not target_phone:
         target_phone = (os.environ.get("TARGET_PHONE") or "").strip() or "120363410041245092@g.us"
+
+    # Diperiksa sebelum WA_TOKEN: tanpa ini caption tidak pernah sempat tercetak saat diuji,
+    # karena skrip berhenti lebih dulu pada token yang kosong.
+    if (os.environ.get("DRY_RUN") or "").strip().lower() in ("1", "true", "yes", "on"):
+        ukuran = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+        print("--- DRY RUN, tidak ada yang dikirim ---")
+        print(f"Target : {target_phone}")
+        print(f"Berkas : {file_path} ({ukuran // 1024} KB)")
+        print(f"Caption:\n{caption}")
+        print("--------------------------------------\n")
+        return
 
     if not wa_token:
         print("Error: Kredensial 'WA_TOKEN' tidak ditemukan di Environment Variables!")
@@ -255,47 +347,48 @@ def kirim_fonnte(file_path, caption, target_phone=None):
 
 
 def hitung_jadwal_hourly_berikutnya(now_wib):
-    """Menentukan teks jadwal laporan hourly berikutnya."""
+    """
+    Teks jadwal laporan hourly berikutnya. Menitnya dibulatkan ke awal jam karena cron
+    memicu pada awal jam, bukan pada menit bot ini kebetulan jalan.
+    """
     current_time_val = now_wib.hour * 100 + now_wib.minute
     if current_time_val >= 2300:
-        return "besok pukul 06:00 WIB"
+        return "besok pukul 06.00 WIB"
     next_wib = now_wib + timedelta(hours=1)
     next_time_val = next_wib.hour * 100 + next_wib.minute
     if next_time_val > 2300:
-        return "besok pukul 06:00 WIB"
-    return f"pukul {next_wib.strftime('%H:%M')} WIB"
+        return "besok pukul 06.00 WIB"
+    return f"pukul {next_wib.strftime('%H')}.00 WIB"
 
 
 def jalankan_tk_panen(now_wib, next_schedule_str):
     """Mengambil screenshot Rekap TK Panen (/publik/rekap-tk-panen) dan mengirim ke grup TK."""
-    date_str = now_wib.strftime("%d/%m/%Y")
-    time_str = now_wib.strftime("%H:%M")
+    waktu_str = format_waktu_indo(now_wib)
     target_grup_tk = (os.environ.get("TARGET_PHONE_TK") or "").strip() or "120363425038459858@g.us"
     tk_jenis = (os.environ.get("TK_PANEN_BELUM_LAPOR_JENIS") or "").strip()
 
+    # Halaman ini tidak menerima ?tanggal=, jadi selalu hari ini.
     ambil_screenshot(REKAP_TK_PANEN_URL, "rekap_tk_panen.jpg")
 
-    warning_section = ""
+    blok = ""
     if tk_jenis:
-        late_regions_tk = ambil_belum_lapor(tk_jenis, fallback_regions=[])
-        if late_regions_tk:
-            warning_text_tk = "\n".join([f"🔴 {r}" for r in late_regions_tk])
+        # dom_tersedia=False: tidak ada pengaisan DOM di sini, jadi daftar kosong dari API yang
+        # gagal berarti "tidak terbaca", bukan "semua sudah mengisi".
+        hasil = ambil_belum_lapor(tk_jenis, fallback_regions=[], dom_tersedia=False)
+        if not hasil["terbaca"]:
+            blok = "\nDaftar regional yang belum mengisi tidak dapat dibaca kali ini.\n"
+        elif hasil["regions"]:
+            daftar = "\n".join(f"- {r}" for r in hasil["regions"])
+            blok = f"\nRegional yang belum mengisi ketersediaan TK panen:\n{daftar}\n"
         else:
-            warning_text_tk = "🔴 (Semua region sudah mengisi)"
-        warning_section = f"\n{warning_text_tk}\n"
+            blok = "\nSemua regional sudah mengisi ketersediaan TK panen.\n"
 
-    if warning_section:
-        caption_tk = (
-            f"📢 Update Regional Yang belum mengisi Ketersediaan TK Panen\n"
-            f"{warning_section}\n"
-            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
-        )
-    else:
-        caption_tk = (
-            f"📢 [Rekap Ketersediaan TK Panen]\n"
-            f"📅 Data per: {date_str} - {time_str} WIB\n"
-            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
-        )
+    caption_tk = (
+        f"*Rekap Ketersediaan TK Panen*\n"
+        f"Data per {waktu_str}.\n"
+        f"{blok}"
+        f"Bot mengirim laporan berikutnya {next_schedule_str}."
+    )
     kirim_fonnte("rekap_tk_panen.jpg", caption_tk, target_phone=target_grup_tk)
 
 
@@ -318,8 +411,8 @@ if __name__ == "__main__":
             print(f"Bypass: Hourly report hanya aktif antara 06:00 - 23:00 WIB (Saat ini: {now_wib.strftime('%H:%M')} WIB)")
             sys.exit(0)
 
-        date_str = now_wib.strftime("%d/%m/%Y")
-        time_str = now_wib.strftime("%H:%M")
+        waktu_str = format_waktu_indo(now_wib)
+        slot_lokal = slot_jatuh_tempo(now_wib)
         next_schedule_str = hitung_jadwal_hourly_berikutnya(now_wib)
 
         # 1. Grafik rekap total panen per jam (/publik/grafik-jam)
@@ -331,9 +424,9 @@ if __name__ == "__main__":
                 require_selector="/publik/" in GRAFIK_URL,
             )
             caption_admin = (
-                f"📊 [Grafik Rekap Total Panen per Jam]\n"
-                f"📅 Data per: {date_str} - {time_str} WIB\n"
-                f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
+                f"*Grafik Rekap Total Panen per Jam*\n"
+                f"Data per {waktu_str}.\n"
+                f"Bot mengirim laporan berikutnya {next_schedule_str}."
             )
             kirim_fonnte("admin.jpg", caption_admin)
 
@@ -348,19 +441,29 @@ if __name__ == "__main__":
             "rekap_cro.jpg",
             extract_selector="[data-belum-lapor]",
         )
-        late_regions = ambil_belum_lapor("realisasi", fallback_regions=dom_late_regions)
+        hasil_cro = ambil_belum_lapor(
+            "realisasi", fallback_regions=dom_late_regions, jam_fallback=slot_lokal
+        )
+        slot = hasil_cro["jam"]
 
-        if late_regions:
-            warning_text = "\n".join([f"⚠️ {r}" for r in late_regions])
+        # Bercabang pada ada-tidaknya slot, bukan pada daftar yang kosong: mode ini jalan
+        # 06.00-23.00 WIB sedangkan slot baru jatuh tempo 07.00-18.00, jadi di luar itu daftar
+        # selalu kosong dan "semua sudah mengisi" akan menjadi kabar yang keliru.
+        if slot is None:
+            blok = "Belum ada jam laporan yang jatuh tempo."
+        elif not hasil_cro["terbaca"]:
+            blok = f"Daftar regional yang belum melaporkan slot jam {slot} tidak dapat dibaca kali ini."
+        elif hasil_cro["regions"]:
+            daftar = "\n".join(f"- {r}" for r in hasil_cro["regions"])
+            blok = f"Regional yang belum melaporkan slot jam {slot}:\n{daftar}"
         else:
-            warning_text = "⚠️ (Semua region sudah mengisi)"
+            blok = f"Semua regional sudah melaporkan slot jam {slot}."
 
         caption_cro = (
-            f"📑 [Tabel Rekap Total Panen per Jam]\n"
-            f"📅 Data per: {date_str} - {time_str} WIB\n\n"
-            f"⚠️ Region Belum Isi Laporan Panen per Jam:\n"
-            f"{warning_text}\n\n"
-            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule_str}."
+            f"*Tabel Rekap Total Panen per Jam*\n"
+            f"Data per {waktu_str}.\n\n"
+            f"{blok}\n\n"
+            f"Bot mengirim laporan berikutnya {next_schedule_str}."
         )
         kirim_fonnte("rekap_cro.jpg", caption_cro)
 
@@ -374,38 +477,51 @@ if __name__ == "__main__":
         print("Menjalankan tugas: DAILY REPORT\n")
 
         now_wib = get_wib_now()
-        date_str = now_wib.strftime("%d/%m/%Y")
+        waktu_str = format_waktu_indo(now_wib)
 
-        # Tentukan apakah pengiriman jam 21:00, 22:00, atau 23:00 WIB
+        # Laporan malam ini mengingatkan regional mengisi rencana panen HARI BERIKUTNYA, jadi
+        # gambar dan daftarnya memakai tanggal besok (BR-17: server menerima estimasi untuk
+        # hari ini dan besok). Satu variabel dipakai keduanya supaya tidak mungkin berbeda hari.
+        besok = tanggal_besok(now_wib)
+        besok_iso = tanggal_iso(besok)
+        besok_str = format_tanggal_indo(besok)
+        print(f"Rencana yang dilaporkan: {besok_str} ({besok_iso})\n")
+
+        # Tentukan apakah pengiriman jam 21.00, 22.00, atau 23.00 WIB
         current_time_val = now_wib.hour * 100 + now_wib.minute
-        caption_time = now_wib.strftime("%H:%M")
-
         if current_time_val <= 2130:
-            next_schedule = "pukul 22:00 WIB."
+            next_schedule = "pukul 22.00 WIB"
         elif current_time_val <= 2230:
-            next_schedule = "pukul 23:00 WIB."
+            next_schedule = "pukul 23.00 WIB"
         else:
-            next_schedule = "besok pukul 21:00 WIB."
+            next_schedule = "besok pukul 21.00 WIB"
 
         # Tabel rencana & estimasi (/publik/rencana-estimasi), dengan daftar region belum mengisi dari API/DOM
         dom_unfilled_plans = ambil_screenshot(
-            RENCANA_ESTIMASI_URL,
+            dengan_tanggal(RENCANA_ESTIMASI_URL, besok_iso),
             "table_modal.jpg",
             extract_selector="[data-belum-isi]",
         )
-        unfilled_plans = ambil_belum_lapor("estimasi", fallback_regions=dom_unfilled_plans)
+        hasil_rencana = ambil_belum_lapor(
+            "estimasi", tanggal=besok_iso, fallback_regions=dom_unfilled_plans
+        )
 
-        if unfilled_plans:
-            warning_text = "\n".join([f"🔴 ◯{r}" for r in unfilled_plans])
+        if not hasil_rencana["terbaca"]:
+            blok = f"Daftar regional yang belum mengisi rencana panen {besok_str} tidak dapat dibaca kali ini."
+        elif hasil_rencana["regions"]:
+            daftar = "\n".join(f"- {r}" for r in hasil_rencana["regions"])
+            blok = f"Regional yang belum mengisi rencana panen {besok_str}:\n{daftar}"
         else:
-            warning_text = "🔴 (Semua region sudah mengisi rencana)"
+            blok = f"Semua regional sudah mengisi rencana panen {besok_str}."
 
+        # Tanggalnya ditulis lengkap, bukan kata "besok", supaya pesan tetap benar bila dibaca
+        # setelah tengah malam.
         caption_daily = (
-            f"📢 [Tabel Rencana & Estimasi Panen]\n"
-            f"📅 Data per: {date_str} - {caption_time} WIB\n\n"
-            f"🔴 Region Belum Mengisi Rencana Panen:\n"
-            f"{warning_text}\n\n"
-            f"⏰ Laporan berikutnya dikirim otomatis {next_schedule}"
+            f"*Tabel Rencana & Estimasi Panen*\n"
+            f"Rencana panen untuk {besok_str}.\n"
+            f"Data per {waktu_str}.\n\n"
+            f"{blok}\n\n"
+            f"Bot mengirim laporan berikutnya {next_schedule}."
         )
         kirim_fonnte("table_modal.jpg", caption_daily)
 
